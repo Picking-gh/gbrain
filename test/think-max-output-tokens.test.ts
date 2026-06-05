@@ -5,6 +5,9 @@
  * o-series) spend a large share of the budget on internal reasoning before
  * emitting an answer, so the 4000 default left `think` with empty/truncated
  * text. They get 16000; everything else stays 4000.
+ *
+ * When `think.max_output_tokens` config is set, the override wins regardless
+ * of model — it becomes the caller's responsibility to budget appropriately.
  */
 import { describe, test, expect } from 'bun:test';
 import { maxOutputTokensFor } from '../src/core/think/index.ts';
@@ -69,5 +72,16 @@ describe('maxOutputTokensFor — thinking-default headroom', () => {
     // Unknown provider strings fail open to the default, never throw.
     expect(maxOutputTokensFor('nonexistent-provider:whatever')).toBe(4000);
     expect(maxOutputTokensFor('voyage:voyage-4')).toBe(4000); // chat-less recipe
+  });
+
+  test('override wins regardless of model', () => {
+    expect(maxOutputTokensFor('anthropic:claude-sonnet-5', 8192)).toBe(8192);
+    expect(maxOutputTokensFor('anthropic:claude-opus-4-8', 4096)).toBe(4096);
+    expect(maxOutputTokensFor('openai:gpt-4o', 10000)).toBe(10000);
+  });
+
+  test('override undefined falls through to defaults', () => {
+    expect(maxOutputTokensFor('anthropic:claude-sonnet-5', undefined)).toBe(16000);
+    expect(maxOutputTokensFor('openai:gpt-4o', undefined)).toBe(4000);
   });
 });

@@ -410,7 +410,7 @@ function validateDimAgainstTouchpoint(
     };
   }
 
-  if (requestedDims !== undefined && requestedDims !== defaultDims) {
+  if (requestedDims !== undefined && defaultDims > 0 && requestedDims !== defaultDims) {
     // User asked for a non-default dim. Walk the precedence chain.
     const customDimOk = isCustomDimValidForProvider(recipe, modelId, requestedDims, dimsOptions);
     if (!customDimOk.valid) {

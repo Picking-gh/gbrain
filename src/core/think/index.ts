@@ -227,7 +227,15 @@ const THINKING_DEFAULT_MAX_OUTPUT_TOKENS = 16000;
 // 4000 default.
 const OPENAI_REASONING_MODEL_RE = /^openai[:/](?:gpt-5|o[0-9]+)(?:[.-]|$)/i;
 const OPENAI_CHAT_SNAPSHOT_RE = /-chat(?:-|$)/i; // gpt-5-chat-latest, gpt-5.2-chat-latest
-export function maxOutputTokensFor(modelStr: string): number {
+
+/**
+ * Return the max output token budget for a model. When `override` is set
+ * (from config `think.max_output_tokens`), it wins. Otherwise the per-model
+ * hardcoded defaults apply: 16000 for Claude 5 and OpenAI reasoning models
+ * (large thinking budget), 4000 for everything else.
+ */
+export function maxOutputTokensFor(modelStr: string, override?: number): number {
+  if (override !== undefined) return override;
   const openaiReasoning =
     OPENAI_REASONING_MODEL_RE.test(modelStr) && !OPENAI_CHAT_SNAPSHOT_RE.test(modelStr);
   // Shared name-based predicate (#4087: one source of truth in gateway.ts —
@@ -772,10 +780,13 @@ export async function runThink(
       };
     }
     let created: Anthropic.Message | null = null;
+    // Config override `think.max_output_tokens` (when set) wins over the
+    // hardcoded per-model defaults below; unset falls through to them.
+    const maxTokensOverride = await readThinkMaxOutputTokens(engine);
     try {
       created = await client.create({
         model: modelUsed,
-        max_tokens: maxOutputTokensFor(normalizeModelId(modelUsed)),
+        max_tokens: maxOutputTokensFor(normalizeModelId(modelUsed), maxTokensOverride),
         system: systemPrompt,
         messages: [{ role: 'user', content: userMessage }],
       });
@@ -1010,6 +1021,23 @@ export async function persistSynthesis(
 // `opts.client` injection path is preserved (test seam — see ThinkLLMClient).
 // `opts.stubResponse` path is preserved (pure-test escape).
 // ─────────────────────────────────────────────────────────────────
+
+/**
+ * Read the `think.max_output_tokens` config key. Returns undefined when
+ * unset, unparseable, or non-positive — callers fall through to the
+ * hardcoded defaults in `maxOutputTokensFor()`.
+ */
+async function readThinkMaxOutputTokens(engine: BrainEngine): Promise<number | undefined> {
+  try {
+    const v = await engine.getConfig('think.max_output_tokens');
+    if (v === null || v === undefined) return undefined;
+    const n = typeof v === 'string' ? parseInt(v, 10) : Number(v);
+    if (isNaN(n) || n <= 0) return undefined;
+    return n;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * v0.40.2.0 — read the `think.trajectory_enabled` config key. Default

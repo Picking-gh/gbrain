@@ -47,6 +47,10 @@ export function mergedProviderEnv(
   if (cfg?.azure_openai_endpoint) fromConfig.AZURE_OPENAI_ENDPOINT = cfg.azure_openai_endpoint;
   if (cfg?.azure_openai_deployment) fromConfig.AZURE_OPENAI_DEPLOYMENT = cfg.azure_openai_deployment;
   if (cfg?.azure_openai_use_entra) fromConfig.AZURE_OPENAI_USE_ENTRA = cfg.azure_openai_use_entra;
+  // LiteLLM proxy: same seam as the hosted keys — config.json litellm_api_key
+  // must reach the litellm recipe's LITELLM_API_KEY in keyless shells
+  // (launchd/cron/MCP), with process env winning via the later merge.
+  if (cfg?.litellm_api_key) fromConfig.LITELLM_API_KEY = cfg.litellm_api_key;
 
   const envReal = Object.fromEntries(
     Object.entries(env).filter(([, v]) => v !== undefined && v !== ''),

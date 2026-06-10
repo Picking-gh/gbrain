@@ -440,15 +440,11 @@ describe('removeSource — clone-cleanup', () => {
     });
   });
 
-  test('refuses to remove "default" source', async () => {
+  test('removing "default" source is allowed with confirmDestructive (0 pages)', async () => {
     await withEnv2(async () => {
-      try {
-        await removeSource(engine, { id: 'default', confirmDestructive: true });
-        throw new Error('expected throw');
-      } catch (e) {
-        expect(e).toBeInstanceOf(SourceOpError);
-        expect((e as SourceOpError).code).toBe('protected_id');
-      }
+      const result = await removeSource(engine, { id: 'default', confirmDestructive: true });
+      expect(result.id).toBe('default');
+      expect(result.pages_deleted).toBe(0);
     });
   });
 });

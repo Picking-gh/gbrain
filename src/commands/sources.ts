@@ -600,8 +600,8 @@ async function runRemove(engine: BrainEngine, args: string[]): Promise<void> {
   const _keepStorage = args.includes('--keep-storage');
   void _keepStorage;
 
-  if (id === 'default') {
-    console.error('Error: cannot remove the "default" source (it backs the pre-v0.17 brain).');
+  if (id === 'default' && !confirmDestructive && !args.includes('--yes')) {
+    console.error('Error: removing the "default" source requires --confirm-destructive or --yes.');
     process.exit(3);
   }
 

@@ -809,7 +809,6 @@ export interface RemoveResult {
 
 /**
  * Hard-remove a source row + cascade. v0.28 additions:
- *  - protected-id guard for "default"
  *  - clone-cleanup: delete the on-disk clone IFF its resolved path is
  *    confined under $GBRAIN_HOME/clones/. realpath+lstat (not startsWith)
  *    to defeat symlink escape attacks.
@@ -823,13 +822,6 @@ export async function removeSource(
   opts: RemoveSourceOpts,
 ): Promise<RemoveResult> {
   validateSourceId(opts.id);
-
-  if (opts.id === 'default') {
-    throw new SourceOpError(
-      'protected_id',
-      'Cannot remove the "default" source (it backs the pre-v0.17 brain).',
-    );
-  }
 
   const src = await fetchSourceRow(engine, opts.id);
   if (!src) {

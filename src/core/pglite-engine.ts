@@ -1570,10 +1570,24 @@ export class PGLiteEngine implements BrainEngine {
     }
 
     if (needsTimelineEventPageId) {
-      // Add only the forward-referenced column. Migration v121 remains the
-      // source of truth for the FK and indexes and runs idempotently afterward.
+      // v121 (timeline_entries_event_page_id): event→timeline projection pointer.
+      // PGLITE_SCHEMA_SQL's idx_timeline_event_page + idx_timeline_event_dedup
+      // reference this column. Pre-v121 brains crash without it.
+      // The FK is added via a guarded DO block (mirrors the migration).
       await this.db.exec(`
         ALTER TABLE timeline_entries ADD COLUMN IF NOT EXISTS event_page_id INTEGER;
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+             WHERE conname = 'timeline_entries_event_page_id_fkey'
+               AND conrelid = 'timeline_entries'::regclass
+          ) THEN
+            ALTER TABLE timeline_entries
+              ADD CONSTRAINT timeline_entries_event_page_id_fkey
+              FOREIGN KEY (event_page_id) REFERENCES pages(id) ON DELETE CASCADE;
+          END IF;
+        END $$;
       `);
     }
 

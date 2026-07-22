@@ -1244,7 +1244,19 @@ async function runSubagentViaGateway(args: GatewayRunArgs): Promise<SubagentResu
   }
 
   // Capability detection drives cache_control injection.
-  const verdict = classifyCapabilities(model);
+  // Per-provider cache_mode overrides (e.g. { "litellm": "auto" }) let
+  // auto-prefix-cache providers report as 'ok' so the loop doesn't warn.
+  // Gateway cache_control injection is still gated on the recipe's own
+  // supports_prompt_cache field, so non-Anthropic providers never get
+  // Anthropic markers injected regardless of the verdict.
+  let cacheMode: Record<string, 'auto'> | undefined;
+  try {
+    const raw = await engine.getConfig('cache_mode');
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      cacheMode = raw as Record<string, 'auto'>;
+    }
+  } catch { /* missing key → no override */ }
+  const verdict = classifyCapabilities(model, { cacheMode });
   const cacheSystem = verdict === 'ok' || verdict === 'degraded:no_parallel';
 
   // Heartbeat bridge.

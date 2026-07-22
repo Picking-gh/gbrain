@@ -330,9 +330,19 @@ export async function checkSubagentCapability(engine: BrainEngine): Promise<Chec
     const tierSubagent = await engine.getConfig('models.tier.subagent');
     const modelsDefault = await engine.getConfig('models.default');
 
+    // Read per-provider cache_mode overrides so auto-cache providers
+    // (OpenAI, DeepSeek, LiteLLM, etc.) don't trigger a spurious warn.
+    let cacheMode: Record<string, 'auto'> | undefined;
+    try {
+      const raw = await engine.getConfig('cache_mode');
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        cacheMode = raw as Record<string, 'auto'>;
+      }
+    } catch { /* missing key → no override */ }
+
     // Helper: explain a verdict in user-facing terms.
     const explain = (resolved: string, source: string): Check | null => {
-      const verdict = classifyCapabilities(resolved);
+      const verdict = classifyCapabilities(resolved, { cacheMode });
       if (verdict === 'unusable:no_tools') {
         return {
           name: 'subagent_capability',

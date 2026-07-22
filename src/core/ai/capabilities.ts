@@ -92,7 +92,10 @@ export interface ProviderCapabilities {
  * provider lacks a `chat` touchpoint (e.g., embedding-only providers like
  * Voyage). Callers that want a soft check can wrap in try/catch and degrade.
  */
-export function getProviderCapabilities(modelString: string): ProviderCapabilities {
+export function getProviderCapabilities(
+  modelString: string,
+  opts?: { cacheMode?: Record<string, 'auto'> },
+): ProviderCapabilities {
   const { recipe, parsed } = resolveRecipe(modelString);
   const chat = recipe.touchpoints.chat;
   if (!chat) {
@@ -110,7 +113,13 @@ export function getProviderCapabilities(modelString: string): ProviderCapabiliti
   // returns capabilities for whatever the user asked for; a nonexistent model
   // surfaces as the provider's own model_not_found at call time.
 
+  // cache_mode.<provider> = 'auto' lifts the recipe's default: providers with
+  // automatic prefix caching (OpenAI, DeepSeek, Gemini, Groq, LiteLLM-proxied
+  // backends, etc.) report supportsPromptCaching=true so doctor + model-config
+  // skip the cost warn. This does NOT affect gateway cache_control injection —
+  // that's gated on the recipe's supports_prompt_cache field.
   const promptCache = chat.supports_prompt_cache;
+  const cacheMode = opts?.cacheMode?.[recipe.id];
 
   const subagentLoop = chat.supports_subagent_loop;
   return {
@@ -118,9 +127,9 @@ export function getProviderCapabilities(modelString: string): ProviderCapabiliti
     supportsSubagentLoop: typeof subagentLoop === 'function'
       ? subagentLoop(parsed.modelId)
       : subagentLoop === true,
-    supportsPromptCaching: typeof promptCache === 'function'
+    supportsPromptCaching: (typeof promptCache === 'function'
       ? promptCache(parsed.modelId)
-      : promptCache === true,
+      : promptCache === true) || cacheMode === 'auto',
     // No recipe exposes parallel-tools-specifically yet; gate on supports_tools.
     // Subsequent waves can split this into its own recipe field if a provider
     // ever supports tools without parallel dispatch.
@@ -166,10 +175,13 @@ export type CapabilityVerdict =
   | 'unusable:no_subagent_loop'
   | 'unknown';
 
-export function classifyCapabilities(modelString: string): CapabilityVerdict {
+export function classifyCapabilities(
+  modelString: string,
+  opts?: { cacheMode?: Record<string, 'auto'> },
+): CapabilityVerdict {
   let caps: ProviderCapabilities;
   try {
-    caps = getProviderCapabilities(modelString);
+    caps = getProviderCapabilities(modelString, opts);
   } catch {
     return 'unknown';
   }

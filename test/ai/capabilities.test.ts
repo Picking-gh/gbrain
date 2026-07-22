@@ -27,6 +27,19 @@ describe('getProviderCapabilities (v0.38 Slice 1 — D6/D7 recipe-driven capabil
     expect(caps.supportsParallelTools).toBe(false);
   });
 
+  it('lifts supportsPromptCaching to true when cache_mode marks provider auto', () => {
+    const caps = getProviderCapabilities('openai:gpt-5.2', { cacheMode: { openai: 'auto' } });
+    expect(caps.supportsToolCalling).toBe(true);
+    expect(caps.supportsPromptCaching).toBe(true); // lifted by cache_mode
+  });
+
+  it('does not lift supportsPromptCaching for unlisted providers', () => {
+    // groq declares no caching (and isn't in cache_mode) — cache_mode for
+    // openai must not leak to another provider.
+    const caps = getProviderCapabilities('groq:llama-3.3-70b-versatile', { cacheMode: { openai: 'auto' } });
+    expect(caps.supportsPromptCaching).toBe(false);
+  });
+
   it('returns capabilities for Google Gemini', () => {
     const caps = getProviderCapabilities('google:gemini-1.5-pro');
     expect(caps.supportsToolCalling).toBe(true);
@@ -118,8 +131,20 @@ describe('classifyCapabilities (D6 — three-tier capability verdict)', () => {
     expect(classifyCapabilities('ollama:qwen3:8b')).toBe('unusable:no_tools');
   });
 
+  it('returns ok for OpenAI when cache_mode marks it auto', () => {
+    expect(classifyCapabilities('openai:gpt-5.2', { cacheMode: { openai: 'auto' } })).toBe('ok');
+  });
+
   it('returns degraded:no_caching for Google Gemini', () => {
     expect(classifyCapabilities('google:gemini-1.5-pro')).toBe('degraded:no_caching');
+  });
+
+  it('returns ok for Google Gemini when cache_mode marks it auto', () => {
+    expect(classifyCapabilities('google:gemini-1.5-pro', { cacheMode: { google: 'auto' } })).toBe('ok');
+  });
+
+  it('returns ok for litellm when cache_mode marks it auto', () => {
+    expect(classifyCapabilities('litellm:claude-sonnet-4-6', { cacheMode: { litellm: 'auto' } })).toBe('ok');
   });
 
   it('allows OpenRouter Anthropic routes for the subagent loop and refuses other OR families', () => {

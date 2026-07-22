@@ -143,6 +143,16 @@ export interface GBrainConfig {
    */
   protocol_installed_at?: string;
   /**
+   * Per-provider prompt cache mode override. When a provider has automatic
+   * prefix caching (OpenAI, DeepSeek, Gemini, Groq, LiteLLM-proxied backends,
+   * etc.), set to `"auto"` to suppress the `degraded:no_caching` doctor warn.
+   * Only `"auto"` is recognized; any other value is ignored. Providers not
+   * listed fall through to their recipe default.
+   *
+   * Example: { "litellm": "auto", "openai": "auto", "deepseek": "auto" }
+   */
+  cache_mode?: Record<string, 'auto'>;
+  /**
    * Optional storage backend config (S3/Supabase/local). Shape matches
    * `StorageConfig` in `./storage.ts`. Typed as `unknown` here to avoid
    * a cyclic import; callers pass this through `createStorage()` which
@@ -1101,6 +1111,7 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'mcp_surface',
   'protocol_installed_at',
   'provider_chat_options',
+  'cache_mode',
   'storage',
   'eval',
   'eval.capture',

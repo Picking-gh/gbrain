@@ -28,6 +28,7 @@ import { loadConfig } from './config.ts';
 import { mergedProviderEnv } from './ai/provider-env.ts';
 import { RECIPES } from './ai/recipes/index.ts';
 import { latestOpenAITiers, rankOpenAIChatModels } from './ai/openai-latest.ts';
+import { readCacheMode, type CacheMode } from './ai/cache-mode.ts';
 
 export type ModelTier = 'utility' | 'reasoning' | 'deep' | 'subagent';
 
@@ -416,6 +417,11 @@ export async function resolveModelDetailed(
 ): Promise<{ model: string; source: ResolveSource }> {
   const envVar = opts.envVar ?? 'GBRAIN_MODEL';
 
+  // Per-provider cache-mode overrides (config key `cache_mode`, a JSON object
+  // like {"litellm":"auto"}). Read once at the top so every
+  // enforceSubagentCapable call shares the same view.
+  const cacheMode = await readCacheMode(engine);
+
   // 1. CLI flag wins
   if (opts.cliFlag && opts.cliFlag.trim()) {
     return { model: await resolveAlias(engine, opts.cliFlag.trim()), source: 'cli_flag' };
@@ -454,7 +460,7 @@ export async function resolveModelDetailed(
       const tierVal = await engine.getConfig(`models.tier.${opts.tier}`);
       if (tierVal && tierVal.trim()) {
         const resolved = await resolveAlias(engine, tierVal.trim());
-        return { model: enforceSubagentCapable(resolved, opts.tier, `models.tier.${opts.tier}`), source: 'tier_config' };
+        return { model: enforceSubagentCapable(resolved, opts.tier, `models.tier.${opts.tier}`, cacheMode), source: 'tier_config' };
       }
     }
 
@@ -462,7 +468,7 @@ export async function resolveModelDetailed(
     const def = await engine.getConfig('models.default');
     if (def && def.trim()) {
       const resolved = await resolveAlias(engine, def.trim());
-      return { model: enforceSubagentCapable(resolved, opts.tier, 'models.default'), source: 'models_default' };
+      return { model: enforceSubagentCapable(resolved, opts.tier, 'models.default', cacheMode), source: 'models_default' };
     }
   }
 
@@ -470,7 +476,7 @@ export async function resolveModelDetailed(
   const env = process.env[envVar];
   if (env && env.trim()) {
     const resolved = await resolveAlias(engine, env.trim());
-    return { model: enforceSubagentCapable(resolved, opts.tier, `env:${envVar}`), source: 'env' };
+    return { model: enforceSubagentCapable(resolved, opts.tier, `env:${envVar}`, cacheMode), source: 'env' };
   }
 
   // 7. Key-aware tier default — when no override beats us, the tier's
@@ -478,7 +484,7 @@ export async function resolveModelDetailed(
   //    caller-supplied fallback.
   if (opts.tier && TIER_DEFAULTS[opts.tier]) {
     const resolved = await resolveAlias(engine, resolveTierDefault(opts.tier));
-    return { model: enforceSubagentCapable(resolved, opts.tier, 'tier-default'), source: 'tier_default' };
+    return { model: enforceSubagentCapable(resolved, opts.tier, 'tier-default', cacheMode), source: 'tier_default' };
   }
 
   // 8. Hardcoded fallback (caller-supplied)
@@ -527,7 +533,12 @@ export async function resolveModel(
  * Once-per-(source, model) warn seam preserved from v0.31.12 (same Set, same
  * suppression key) so doctor + first-call surfaces don't double-warn.
  */
-function enforceSubagentCapable(resolved: string, tier: ModelTier | undefined, source: string): string {
+function enforceSubagentCapable(
+  resolved: string,
+  tier: ModelTier | undefined,
+  source: string,
+  cacheMode?: CacheMode,
+): string {
   if (tier !== 'subagent') return resolved;
 
   // Lazy import keeps capabilities.ts out of model-config's eager-load surface
@@ -541,7 +552,7 @@ function enforceSubagentCapable(resolved: string, tier: ModelTier | undefined, s
     // from capabilities.ts directly:
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const cap = require('./ai/capabilities.ts') as typeof import('./ai/capabilities.ts');
-    verdict = cap.classifyCapabilities(resolved);
+    verdict = cap.classifyCapabilities(resolved, { cacheMode });
   } catch {
     // If the import fails (e.g. malformed recipe registry during boot), be
     // permissive and just return the resolved model — surface the underlying

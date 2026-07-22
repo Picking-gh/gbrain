@@ -27,8 +27,8 @@ import { withEnv } from './helpers/with-env.ts';
 
 class StubEngine {
   readonly kind = 'pglite' as const;
-  private cfg = new Map<string, string>();
-  set(key: string, value: string) { this.cfg.set(key, value); }
+  private cfg = new Map<string, unknown>();
+  set(key: string, value: unknown) { this.cfg.set(key, value); }
   async getConfig(key: string) { return this.cfg.get(key) ?? null; }
   // unused stubs to satisfy the BrainEngine duck-type at the resolveModel boundary
   async setConfig() {}
@@ -258,6 +258,21 @@ describe('resolveModel — v0.31.12 tier system', () => {
     // loops". On providers that already cache prompt prefixes server-side that
     // advice is backwards, so the capability check must not fire it.
     stub.set('models.default', 'openai:gpt-5.2');
+    const m = await resolveModel(stub as never, {
+      tier: 'subagent',
+      fallback: 'sonnet',
+    });
+    expect(m).toBe('openai:gpt-5.2');
+    expect(stderrCapture).not.toContain('caching');
+  });
+
+  test('cache_mode=auto suppresses no_caching warn for OpenAI subagent', async () => {
+    stub.set('models.default', 'openai:gpt-5.2');
+    // Stored the way the DB stores it — a JSON string in a TEXT column (#2139
+    // class: the original object-only reader silently no-op'd on real
+    // engines while passing against an object-returning stub).
+    stub.set('cache_mode', JSON.stringify({ openai: 'auto' }));
+    stderrCapture = '';
     const m = await resolveModel(stub as never, {
       tier: 'subagent',
       fallback: 'sonnet',

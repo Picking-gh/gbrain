@@ -55,6 +55,7 @@ import { buildSystemPrompt, DEFAULT_SUBAGENT_SYSTEM } from '../system-prompt.ts'
 import { toolLoop as gatewayToolLoop, isThinkingModel, THINKING_MODEL_MAX_OUTPUT_TOKENS } from '../../ai/gateway.ts';
 import type { ChatToolDef, ChatMessage, ChatBlock, ChatResult, ToolHandler } from '../../ai/gateway.ts';
 import { classifyCapabilities } from '../../ai/capabilities.ts';
+import { readCacheMode } from '../../ai/cache-mode.ts';
 import { runSubagentOneshot, ONESHOT_TOOL_USE_ID_PREFIX } from './subagent-oneshot.ts';
 import type { OneshotFallbackReason } from '../types.ts';
 import {
@@ -1274,7 +1275,13 @@ async function runSubagentViaGateway(args: GatewayRunArgs): Promise<SubagentResu
   }
 
   // Capability detection drives cache_control injection.
-  const verdict = classifyCapabilities(model);
+  // Per-provider cache_mode overrides (config key `cache_mode`, a JSON object
+  // like {"litellm":"auto"}) let auto-prefix-cache providers report as 'ok'
+  // so the loop doesn't warn. Gateway cache_control injection is still gated
+  // on the recipe's own supports_prompt_cache field, so non-Anthropic
+  // providers never get Anthropic markers injected regardless of the verdict.
+  const cacheMode = await readCacheMode(engine);
+  const verdict = classifyCapabilities(model, { cacheMode });
   const cacheSystem = verdict === 'ok' || verdict === 'degraded:no_parallel';
 
   // Heartbeat bridge.

@@ -484,3 +484,82 @@ describe('#2753 — doctor and the subagent worker share one truthiness set', ()
     }
   });
 });
+
+describe('cache_mode — object-valued key (set-time validation)', () => {
+  function setStubEngine(): { engine: BrainEngine; setCalls: Array<[string, string]> } {
+    const setCalls: Array<[string, string]> = [];
+    const engine = {
+      getConfig: async () => null,
+      setConfig: async (key: string, value: string) => { setCalls.push([key, value]); },
+    } as unknown as BrainEngine;
+    return { engine, setCalls };
+  }
+
+  async function runConfigCapture(
+    engine: BrainEngine,
+    args: string[],
+  ): Promise<{ logs: string[]; errs: string[]; exit: number | null }> {
+    const logs: string[] = [];
+    const errs: string[] = [];
+    let exit: number | null = null;
+    const logSpy = spyOn(console, 'log').mockImplementation((...a: unknown[]) => { logs.push(a.join(' ')); });
+    const errSpy = spyOn(console, 'error').mockImplementation((...a: unknown[]) => { errs.push(a.join(' ')); });
+    const exitSpy = spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exit = code ?? 0;
+      throw new Error(`EXIT:${code}`);
+    }) as never);
+    try {
+      await runConfig(engine, args);
+    } catch (e) {
+      if (!(e as Error).message.startsWith('EXIT:')) throw e;
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+    return { logs, errs, exit };
+  }
+
+  // The original commit documented `gbrain config set cache_mode.litellm auto`,
+  // which the unknown-key gate rejects (no `cache_mode.` prefix) — so the key
+  // was unwritable. The supported form is the JSON object, same as
+  // embedding_columns; this pins that it reaches the DB row verbatim.
+  test('accepts a JSON object of auto providers and persists it verbatim', async () => {
+    const { engine, setCalls } = setStubEngine();
+    const { errs, exit } = await runConfigCapture(
+      engine, ['set', 'cache_mode', '{"litellm":"auto","openai":"auto"}'],
+    );
+    expect(exit).toBeNull();
+    expect(errs.join('\n')).not.toContain('rejected');
+    expect(setCalls).toEqual([['cache_mode', '{"litellm":"auto","openai":"auto"}']]);
+  });
+
+  test('rejects an unrecognized mode at set time (nothing written)', async () => {
+    const { engine, setCalls } = setStubEngine();
+    const { errs, exit } = await runConfigCapture(engine, ['set', 'cache_mode', '{"litellm":"always"}']);
+    expect(exit).toBe(1);
+    expect(errs.join('\n')).toContain("cache_mode.litellm must be 'auto'");
+    expect(setCalls).toEqual([]);
+  });
+
+  test('rejects malformed JSON and non-object payloads', async () => {
+    for (const bad of ['not-json', '["auto"]', '"auto"', '42']) {
+      const { engine, setCalls } = setStubEngine();
+      const { errs, exit } = await runConfigCapture(engine, ['set', 'cache_mode', bad]);
+      expect(exit).toBe(1);
+      expect(errs.join('\n')).toContain('cache_mode rejected');
+      expect(setCalls).toEqual([]);
+    }
+  });
+
+  test('the documented dotted form is NOT silently accepted as a JSON row', async () => {
+    // cache_mode.litellm is neither a known key nor a blessed prefix; the fold
+    // into the object row is intentionally not implemented (get/unset would be
+    // half-wired). Pin the refusal so the docs and the gate cannot drift.
+    const { engine, setCalls } = setStubEngine();
+    const { errs, exit } = await runConfigCapture(engine, ['set', 'cache_mode.litellm', 'auto']);
+    expect(exit).toBe(1);
+    expect(errs.join('\n')).toContain('Unknown config key "cache_mode.litellm"');
+    expect(setCalls).toEqual([]);
+  });
+});

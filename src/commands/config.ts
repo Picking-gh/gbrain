@@ -926,6 +926,33 @@ export async function runConfig(engine: BrainEngine, args: string[]) {
       }
     }
 
+    if (key === 'cache_mode') {
+      // Object-valued key stored as JSON in one row (same lifecycle as
+      // embedding_columns). Validate at set time so a typo is rejected where
+      // the operator can fix it — readers deliberately ignore malformed rows
+      // (a warning-suppression knob must never crash a run), which would
+      // otherwise make a bad value look like "set but silently ignored".
+      try {
+        const parsed = JSON.parse(value);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('cache_mode must be a JSON object');
+        }
+        for (const [provider, mode] of Object.entries(parsed)) {
+          if (mode !== 'auto') {
+            throw new Error(
+              `cache_mode.${provider} must be 'auto' (got ${JSON.stringify(mode)})`,
+            );
+          }
+        }
+      } catch (err) {
+        console.error(`[config] cache_mode rejected: ${(err as Error).message}`);
+        console.error(`[config] Expected: gbrain config set cache_mode '{"litellm":"auto","openai":"auto"}'`);
+        console.error(`[config] Only 'auto' is recognized — it lifts the degraded:no_caching warn for providers`);
+        console.error(`[config] that already cache prompt prefixes server-side.`);
+        process.exit(1);
+      }
+    }
+
     if (key === 'search_embedding_column') {
       // Validate against the merged registry (file + DB plane + builtins).
       // We re-read merged config so a prior `gbrain config set

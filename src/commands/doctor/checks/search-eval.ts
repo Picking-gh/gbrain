@@ -7,6 +7,7 @@
 import type { BrainEngine } from '../../../core/engine.ts';
 import type { Check } from '../../doctor.ts';
 import { loadConfig, type GBrainConfig } from '../../../core/config.ts';
+import { readCacheMode } from '../../../core/ai/cache-mode.ts';
 // Leaf module (no flag surface of its own) — see that file for why this
 // isn't imported from extract-conversation-facts.ts directly (#4135).
 import { ALLOWED_TYPES } from '../../../core/facts/conversation-types.ts';
@@ -363,9 +364,13 @@ export async function checkSubagentCapability(engine: BrainEngine): Promise<Chec
   try {
     const { classifyCapabilities } = await import('../../../core/ai/capabilities.ts');
 
+    // Read per-provider cache_mode overrides so auto-cache providers
+    // (OpenAI, DeepSeek, LiteLLM, etc.) don't trigger a spurious warn.
+    const cacheMode = await readCacheMode(engine);
+
     // Helper: explain a verdict in user-facing terms.
     const explain = (resolved: string, source: string): Check | null => {
-      const verdict = classifyCapabilities(resolved);
+      const verdict = classifyCapabilities(resolved, { cacheMode });
       if (verdict === 'unusable:no_tools') {
         return {
           name: 'subagent_capability',

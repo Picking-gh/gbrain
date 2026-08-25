@@ -53,17 +53,17 @@ export const litellmProxy: Recipe = {
      * model list + openai-compat tier lets any model through (the gateway
      * behind the proxy decides what's real).
      *
-     * Same cost=0 default as other local recipes — when the proxy fronts a
-     * paid provider, set costs via provider per-model config.
+     * Costs stay unset (unknown — the proxied backend decides); set them via
+     * provider per-model config when the proxy fronts a paid provider.
      */
     chat: {
       models: [],
       supports_tools: true,
       supports_subagent_loop: true,
       supports_prompt_cache: false,
-      max_context_tokens: 131072,
-      cost_per_1m_input_usd: 0,
-      cost_per_1m_output_usd: 0,
+      max_context_tokens: 200_000,
+      cost_per_1m_input_usd: undefined,
+      cost_per_1m_output_usd: undefined,
       price_last_verified: '2026-06-14',
     },
   },

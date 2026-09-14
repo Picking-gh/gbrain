@@ -1277,6 +1277,8 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'mcp_surface',
   'protocol_installed_at',
   'provider_chat_options',
+  // Override think's hardcoded per-model output-token budget.
+  'think.max_output_tokens',
   'cache_mode',
   'storage',
   'eval',

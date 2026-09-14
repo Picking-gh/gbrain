@@ -8,8 +8,11 @@
  *
  * Also pins the gbrain#4375 truncation labeling: a max_tokens-cut envelope
  * is 'output_truncated' / LLM_OUTPUT_TRUNCATED, never the generic not_json.
+ *
+ * When `think.max_output_tokens` config is set, the override wins regardless
+ * of model — it becomes the caller's responsibility to budget appropriately.
  */
-import { afterAll, beforeAll, describe, test, expect } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, test, expect } from 'bun:test';
 import { maxOutputTokensFor, runThink, type ThinkLLMClient } from '../src/core/think/index.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { importFromContent } from '../src/core/import-file.ts';
@@ -107,6 +110,17 @@ describe('maxOutputTokensFor — thinking-default headroom', () => {
     expect(maxOutputTokensFor('zhipu:glm-4-plus')).toBe(4000);
     expect(maxOutputTokensFor('zhipu:glm-3-turbo')).toBe(4000);
   });
+
+  test('override wins regardless of model', () => {
+    expect(maxOutputTokensFor('anthropic:claude-sonnet-5', 8192)).toBe(8192);
+    expect(maxOutputTokensFor('anthropic:claude-opus-4-8', 4096)).toBe(4096);
+    expect(maxOutputTokensFor('openai:gpt-4o', 10000)).toBe(10000);
+  });
+
+  test('override undefined falls through to defaults', () => {
+    expect(maxOutputTokensFor('anthropic:claude-sonnet-5', undefined)).toBe(16000);
+    expect(maxOutputTokensFor('openai:gpt-4o', undefined)).toBe(4000);
+  });
 });
 
 describe('runThink — max_tokens truncation labeling (gbrain#4375)', () => {
@@ -172,5 +186,98 @@ describe('runThink — max_tokens truncation labeling (gbrain#4375)', () => {
     expect(result.synthesis_status).toBe('not_json');
     expect(result.warnings).toContain('LLM_OUTPUT_NOT_JSON');
     expect(result.warnings).not.toContain('LLM_OUTPUT_TRUNCATED');
+  });
+});
+
+/**
+ * The config read path itself (`readThinkMaxOutputTokens`), which the pure
+ * `maxOutputTokensFor` tests above cannot cover: they prove the override
+ * argument wins, not that `runThink` ever reads `think.max_output_tokens` or
+ * wires it into `client.create`. This is the seam that would silently rot if
+ * the config lookup broke — the pure test would stay green.
+ *
+ * Values are written as STRINGS because that is what the config table stores
+ * (`value TEXT`); a reader that only handled numbers would pass a stub and
+ * no-op on a real engine.
+ */
+describe('runThink — think.max_output_tokens config override', () => {
+  let engine: PGLiteEngine;
+  let captured: number[];
+
+  beforeAll(async () => {
+    engine = new PGLiteEngine();
+    await engine.connect({});
+    await engine.initSchema();
+    const imported = await importFromContent(
+      engine,
+      'notes/quokka-payments',
+      '---\ntitle: Quokka Payments\ntype: note\n---\n\nThe quokka payments migration finished in March with zero downtime.',
+      { noEmbed: true, sourceId: 'default' },
+    );
+    expect(imported.status).toBe('imported');
+    // Pin the model so the per-model default the override competes with is
+    // deterministic (avoid depending on which provider keys the test shell has).
+    await engine.setConfig('models.think', 'anthropic:claude-opus-4-7');
+  });
+
+  afterAll(async () => {
+    await engine.disconnect();
+  });
+
+  beforeEach(async () => {
+    captured = [];
+    await engine.unsetConfig('think.max_output_tokens');
+  });
+
+  function capturingClient(): ThinkLLMClient {
+    return {
+      create: async (params) => {
+        captured.push(params.max_tokens);
+        return {
+          id: 'msg_stub',
+          type: 'message',
+          role: 'assistant',
+          model: 'anthropic:claude-opus-4-7',
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 10, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null },
+          content: [{ type: 'text', text: '{"answer":"ok","citations":[]}' }],
+        };
+      },
+    };
+  }
+
+  async function runOnce(): Promise<void> {
+    await runThink(engine, {
+      question: 'quokka payments migration status',
+      client: capturingClient(),
+      withTrajectory: false,
+    });
+  }
+
+  test('unset → the per-model default reaches client.create (opus 4.x = 16000)', async () => {
+    await runOnce();
+    expect(captured).toEqual([16000]);
+  });
+
+  test('config value wins over the per-model default', async () => {
+    await engine.setConfig('think.max_output_tokens', '8192');
+    await runOnce();
+    expect(captured).toEqual([8192]);
+  });
+
+  test('a value ABOVE the default also wins (raise the cap, not just clamp down)', async () => {
+    await engine.setConfig('think.max_output_tokens', '32000');
+    await runOnce();
+    expect(captured).toEqual([32000]);
+  });
+
+  test('non-positive / unparseable values fall through to the default', async () => {
+    for (const bad of ['0', '-5', 'abc', '', '   ']) {
+      captured = [];
+      await engine.setConfig('think.max_output_tokens', bad);
+      await runOnce();
+      expect(captured, `value=${JSON.stringify(bad)}`).toEqual([16000]);
+    }
   });
 });

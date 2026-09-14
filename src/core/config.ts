@@ -171,6 +171,26 @@ export interface GBrainConfig {
    * synthesize flows in their respective handlers (per D13 review decision).
    */
   chat_fallback_chain?: string[];
+  /**
+   * Reranker model for hybrid search — the file-plane companion to the DB
+   * `search.reranker.model` knob, with the same ergonomics as
+   * `embedding_model` / `chat_model`: declare it in `~/.gbrain/config.json`
+   * (or `GBRAIN_RERANKER_MODEL`) instead of running `config set`.
+   *
+   * Live search resolves it as
+   * per-call > this > DB `search.reranker.model` > the active mode bundle's
+   * default (gbrain's usual env > file > DB order), so a proxy-provided
+   * reranker is reachable with `"reranker_model": "litellm:<model>"`.
+   */
+  reranker_model?: string;
+  /**
+   * File-plane companion to `search.reranker.enabled`. `false` skips rerank
+   * regardless of `reranker_model`; same precedence as that key. Kept
+   * alongside the model so a config.json-only install can declare the whole
+   * reranker setup in one place (a model with no way to flag it on/off is a
+   * half-config).
+   */
+  reranker_enabled?: boolean;
   /** Optional base URL overrides for openai-compatible providers (keyed by recipe id). */
   provider_base_urls?: Record<string, string>;
   /** Optional chat request providerOptions overrides keyed by recipe id or "recipe:modelId". */
@@ -797,6 +817,12 @@ export function loadConfig(): GBrainConfig | null {
     ...(process.env.GBRAIN_CHAT_FALLBACK_CHAIN
       ? { chat_fallback_chain: process.env.GBRAIN_CHAT_FALLBACK_CHAIN.split(',').map(s => s.trim()).filter(Boolean) }
       : {}),
+    // File-plane reranker knobs (companions to the DB `search.reranker.*`
+    // rows). Empty-string env is treated as unset, matching the other folds.
+    ...(process.env.GBRAIN_RERANKER_MODEL ? { reranker_model: process.env.GBRAIN_RERANKER_MODEL } : {}),
+    ...(process.env.GBRAIN_RERANKER_ENABLED
+      ? { reranker_enabled: isConfigTruthy(process.env.GBRAIN_RERANKER_ENABLED) }
+      : {}),
     ...(process.env.GBRAIN_EMBEDDING_MULTIMODAL
       ? { embedding_multimodal: process.env.GBRAIN_EMBEDDING_MULTIMODAL === 'true' }
       : {}),
@@ -1270,6 +1296,9 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'expansion_model',
   'chat_model',
   'chat_fallback_chain',
+  // File-plane reranker knobs — companions to search.reranker.* (DB plane).
+  'reranker_model',
+  'reranker_enabled',
   'provider_base_urls',
   // Integration gates (file-plane, hook-lane)
   'integrations.memorable.enabled',

@@ -404,6 +404,21 @@ export async function runConfig(engine: BrainEngine, args: string[]) {
       }
       return;
     }
+    // File-plane reranker knobs — same door as the vendor keys above (see the
+    // set-path branch for why they must not become DB rows).
+    if (key === 'reranker_model' || key === 'reranker_enabled') {
+      const { loadConfigFileOnly, saveConfig } = await import('../core/config.ts');
+      const cfg = loadConfigFileOnly() as unknown as Record<string, unknown> | null;
+      if (cfg && key in cfg) {
+        delete cfg[key];
+        saveConfig(cfg as unknown as Parameters<typeof saveConfig>[0]);
+        console.log(`Unset ${key} (file plane)`);
+      } else {
+        console.error(`Config key not found: ${key}`);
+        process.exit(1);
+      }
+      return;
+    }
     const n = await engine.unsetConfig(key);
     if (n > 0) {
       console.log(`Unset ${key}`);
@@ -744,6 +759,36 @@ export async function runConfig(engine: BrainEngine, args: string[]) {
       saveConfig(cfg);
       // #892: redact — the raw secret must not reach scrollback or shell history.
       console.log(`Set ${key} = ${redactConfigValue(key, value)} (file plane: ~/.gbrain/config.json)`);
+      return;
+    }
+
+    // File-plane reranker knobs — companions to the DB `search.reranker.*`
+    // rows (see GBrainConfig.reranker_model / reranker_enabled). Routed to the
+    // file plane like the vendor keys above, NOT left to the generic DB write:
+    // the reader (loadSearchModeConfig) overlays them from loadConfig(), so a
+    // DB row under these names would be echoed by `config get` and read by
+    // nothing — the exact silent-no-op the embedding_model refusal below
+    // exists to prevent.
+    if (key === 'reranker_model' || key === 'reranker_enabled') {
+      const { loadConfigFileOnly, saveConfig, isConfigTruthy } = await import('../core/config.ts');
+      const cfg = (loadConfigFileOnly() ?? { engine: 'pglite' }) as Parameters<typeof saveConfig>[0];
+      if (key === 'reranker_model') {
+        const model = value.trim();
+        if (!model.includes(':')) {
+          console.error(`[config] reranker_model must be "<provider>:<model>" (got '${value}').`);
+          console.error('[config] Example: gbrain config set reranker_model litellm:<your-rerank-model>');
+          console.error('[config] Nothing was written.');
+          process.exit(1);
+        }
+        cfg.reranker_model = model;
+        saveConfig(cfg);
+        console.log(`Set ${key} = ${model} (file plane: ~/.gbrain/config.json)`);
+      } else {
+        const on = isConfigTruthy(value);
+        cfg.reranker_enabled = on;
+        saveConfig(cfg);
+        console.log(`Set ${key} = ${on} (file plane: ~/.gbrain/config.json)`);
+      }
       return;
     }
 

@@ -1744,6 +1744,27 @@ export async function loadSearchModeConfig(
     if (overrideValues[i] !== undefined) configMap[key] = overrideValues[i];
   });
 
+  // File-plane companions for the reranker knobs. `config set` writes the DB
+  // rows above, but `embedding_model` / `chat_model` are declared in
+  // ~/.gbrain/config.json — so a config.json-only install had no way to point
+  // rerank at a model (the DB-only read silently ignored the file plane).
+  // gbrain's order is env > file > DB, so these OVERWRITE the DB rows; the
+  // per-call seams still win (resolveSearchMode's `pick` reads perCall first).
+  // Scoped to the reranker pair on purpose — the other search.* knobs keep
+  // their DB-only contract. Dynamic import keeps config.ts (a large module)
+  // off this file's eager import surface; the caller already reads the file
+  // plane per search (hybrid.ts → loadConfigWithEngine), so this adds no new
+  // IO class.
+  try {
+    const { loadConfig } = await import('../config.ts');
+    const fileCfg = loadConfig();
+    const fileModel = typeof fileCfg?.reranker_model === 'string' ? fileCfg.reranker_model.trim() : '';
+    if (fileModel) configMap['search.reranker.model'] = fileModel;
+    if (typeof fileCfg?.reranker_enabled === 'boolean') {
+      configMap['search.reranker.enabled'] = fileCfg.reranker_enabled ? 'true' : 'false';
+    }
+  } catch { /* unreadable file plane → DB rows + mode bundle stand */ }
+
   return {
     mode,
     overrides: loadOverridesFromConfig(configMap),
